@@ -18,6 +18,8 @@ package formatter
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -170,5 +172,110 @@ func TestFormatList(t *testing.T) {
 				t.Errorf("FormatList(%v) = %s, want %s", tt.items, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestFormatOutput(t *testing.T) {
+	data := map[string]any{
+		"name":  "test",
+		"count": 42,
+	}
+
+	tests := []struct {
+		name      string
+		format    string
+		wantError bool
+		checkFunc func(string) bool
+	}{
+		{
+			name:      "json format",
+			format:    "json",
+			wantError: false,
+			checkFunc: func(s string) bool {
+				return strings.Contains(s, `"name"`) && strings.Contains(s, `"count"`)
+			},
+		},
+		{
+			name:      "yaml format",
+			format:    "yaml",
+			wantError: false,
+			checkFunc: func(s string) bool {
+				return strings.Contains(s, "name:") && strings.Contains(s, "count:")
+			},
+		},
+		{
+			name:      "table format with function",
+			format:    "table",
+			wantError: false,
+			checkFunc: func(s string) bool {
+				return strings.Contains(s, "custom table")
+			},
+		},
+		{
+			name:      "invalid format",
+			format:    "invalid",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			var tableFunc func(io.Writer, any) error
+
+			if tt.format == "table" {
+				tableFunc = func(w io.Writer, d any) error {
+					fmt.Fprint(w, "custom table")
+					return nil
+				}
+			}
+
+			err := FormatOutput(&buf, tt.format, data, tableFunc)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if tt.checkFunc != nil && !tt.checkFunc(buf.String()) {
+					t.Errorf("Output check failed for format %s, got: %s", tt.format, buf.String())
+				}
+			}
+		})
+	}
+}
+
+func TestFormatOutputTableNoFunction(t *testing.T) {
+	var buf bytes.Buffer
+	data := map[string]any{"test": "data"}
+
+	err := FormatOutput(&buf, "table", data, nil)
+	if err == nil {
+		t.Error("Expected error when table function is nil")
+	}
+	if !strings.Contains(err.Error(), "table formatter not provided") {
+		t.Errorf("Expected 'table formatter not provided' error, got: %v", err)
+	}
+}
+
+func TestNewTableWriter(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewTableWriter(&buf)
+
+	if w == nil {
+		t.Error("NewTableWriter returned nil")
+	}
+
+	// Test that it actually works
+	fmt.Fprintln(w, "COL1\tCOL2")
+	fmt.Fprintln(w, "val1\tval2")
+	w.Flush()
+
+	result := buf.String()
+	if !strings.Contains(result, "COL1") || !strings.Contains(result, "val2") {
+		t.Errorf("Table writer output incorrect: %s", result)
 	}
 }
